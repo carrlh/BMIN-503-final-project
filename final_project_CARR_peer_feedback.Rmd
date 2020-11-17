@@ -232,7 +232,7 @@ dx_total <- clean_data %>%
   ungroup() %>% 
   select(dx1_icd10, dx2_icd10) %>% 
   gather(key = "source", value = "dx") %>% #place diagnoses in one column
-  add_count(short_dx = substr(dx, 1, 5)) %>%  #look only at first 5 characters in the ICD codes
+  add_count(short_dx = substr(dx, 1, 5)) %>%  #look only at first 4 characters in the ICD codes
   mutate(n = ifelse(short_dx == "Z38.0", 0, n)) %>% #Z38.0 is a diagnosis I'm uninterested in (it describes birth status), so I want this removed
   distinct(dx, n) %>% #maintaining granularity, but eliminating our short column
   print()
@@ -245,12 +245,12 @@ dx_2 <- dx_total %>% #new dataframe for secondary diagnoses
   rename(dx2_icd10 = dx,
          dx2_n = n) #renaming the dx column for the secondary diagnosis group to prepare to join it with the primary diagnoses
 
-clean_data %>% 
+clean_data <- clean_data %>% 
   left_join(dx_1) %>% #join in dx_1 and dx_2 to clean data
   left_join(dx_2) %>% 
   mutate(top_dx =
     case_when(dx1_n >= dx2_n ~ dx1_icd10, 
-              TRUE ~ dx2_icd10) #bring back the more common diagnosis
+              TRUE ~ dx2_icd10) #bring back the more common diagnosis to then be used in logistic regression
   )
 
 
@@ -275,7 +275,7 @@ rank_data <- clean_data %>%
   mutate(pred_order = as.factor(pred_order) %>% 
            fct_relevel("last", "other", "first")) %>% #make into a factor and reorder them
   mutate(ett_status = as.factor(ett_status)) %>% #make ETT status into a factor for further analysis (it was recognized this was a significant variable in analysis and for visualization, I needed to ensure this was a factor) 
-  select(visit_key, accurate_prediction_ind, discharge_prediction, days_until_discharge, diff, gest_age_groups, sex, race, payor_group, pred_order, central_line_status, ett_status, iv_fluid_or_med_start_post_prediction) #select variables
+  select(visit_key, accurate_prediction_ind, discharge_prediction, days_until_discharge, diff, gest_age_groups, sex, race, payor_group, pred_order, central_line_status, ett_status, iv_fluid_or_med_start_post_prediction, top_dx) #select variables
 
 #bivariate analysis using a function and for loop
 calc_p <- function(x) { #make a function to put into the for loop
@@ -292,10 +292,10 @@ for (i in names(rank_data %>% select(-c(visit_key, accurate_prediction_ind, disc
   all_variables <- bind_rows(all_variables, calc_p(i)) #bind the result from the above function
 }
 
-print(all_variables) #all variables
+print(all_variables) #all variables to look at p-values
 
 all_variables %>% 
-  filter(p_val <= .05) %>% #filter for significant with p<0.05
+  filter(p_val <= .05) %>% #filter for significant variables with p<0.05
   arrange(p_val) #order values
 
 #discharge prediction choice and prediction order appear to be the only significant contributors to accuracy
@@ -307,17 +307,17 @@ Logistic regression of significant variables from bivariate analysis.
 ```{r}
 
 summary(glm(accurate_prediction_ind ~ discharge_prediction + pred_order, data = rank_data, family = binomial))
-#all of these variables are associated with accuracy
+#in the logistic regression, only the discharge prediction appears to be significantly associated with accuracy
 
 #let's look at first vs. last prediction accuracy by discharge prediction category
 rank_data_first <- rank_data %>% 
   filter(pred_order == "first")
-summary(glm(accurate_prediction_ind ~ discharge_prediction + gest_age_groups + sex + race + payor_group + central_line_status + ett_status + iv_fluid_or_med_start_post_prediction, data = rank_data_first, family = binomial))
+summary(glm(accurate_prediction_ind ~ discharge_prediction + gest_age_groups + sex + race + payor_group + central_line_status + ett_status + iv_fluid_or_med_start_post_prediction + top_dx, data = rank_data_first, family = binomial))
 #no significant mediators of accuracy on first estimates
 
 rank_data_last <- rank_data %>%
   filter(pred_order == "last")
-summary(glm(accurate_prediction_ind ~ discharge_prediction + gest_age_groups + sex + race + payor_group + central_line_status + ett_status + iv_fluid_or_med_start_post_prediction, data = rank_data_last, family = binomial))
+summary(glm(accurate_prediction_ind ~ discharge_prediction + gest_age_groups + sex + race + payor_group + central_line_status + ett_status + iv_fluid_or_med_start_post_prediction + top_dx, data = rank_data_last, family = binomial))
 #discharge prediction is the only significant mediator of accuracy at the time of the last prediction
 
 ```
@@ -332,9 +332,8 @@ rank_data_correct <- rank_data %>%
     diff = (as.numeric(diff))
     ) 
 
-summary(lm(diff ~ discharge_prediction + gest_age_groups + sex + race + payor_group + pred_order + central_line_status + ett_status + iv_fluid_or_med_start_post_prediction, data = rank_data_correct)) 
-#gestational age >35 weeks, prediction order, and ETT status are associated with how off we are in our estimations
-
+summary(lm(diff ~ discharge_prediction + gest_age_groups + sex + race + payor_group + pred_order + central_line_status + ett_status + iv_fluid_or_med_start_post_prediction + top_dx, data = rank_data_correct)) 
+#gestational age >35 weeks, prediction order, ETT status, and a diagnosis of stage 2 NEC  are associated with how off we are in our estimations
 
 ggplot(rank_data_correct, aes(x = diff, y = gest_age_groups)) + 
   geom_boxplot() +
@@ -357,8 +356,13 @@ ggplot(aes(y = ett_status, x = diff)) +
   geom_boxplot() +
   labs(y = "ETT status", x = "days off of time window") +
   coord_cartesian(xlim = c(0,200))
-#
+#If you have an ETT or have one placed after the question is asked, you are more likely to stay in the hospital for longer
 
+ggplot(rank_data_correct, aes(y = top_dx, x = diff)) +
+  geom_boxplot() +
+  labs(y = "ICD-10 code", x = "day off of time window") +
+  coord_cartesian(xlim = c(0, 50))
+#this needs some work!
 ```
 
 
