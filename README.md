@@ -1,1 +1,1 @@
-This repo contains an Rmd file for the BMIN 503 final project. The csv file containing deidentified data is available upon request.
+This repo contains an Rmd and html file for the BMIN 503 final project. My project examines accuracy of provider predictions of NICU patient discharge timelines. Patient demographics, discharge timeline predictions, and other hospital care details are contained in a deidentified CSV file, which is available upon request.
