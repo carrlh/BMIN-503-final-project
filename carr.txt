@@ -1,1 +1,2 @@
 This is my new file.
+This file was finalized on 12.8.2020
